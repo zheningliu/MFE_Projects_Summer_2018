@@ -2,96 +2,117 @@
 """
 Created on Wed Jun  6 11:06:22 2018
 
-@author: tomzhang19901030
+@author: Tom Zhang & Nini Liu
 """
 
 import numpy as np
 import os
 import pandas as pd
 from scipy.optimize import minimize
-class Simple_Calculation:
-    # Price must be Zero Coupon Bond, must have maturity
-    def cont_comp_ret(r=0,T=0):
-        return np.exp(r*T)
-    
-    def disc_comp_ret(r=0,k=1,T=0):
-        return (1+r/k)**(k*T)
-    
-    def getdiscountfunction (df,face = 100):
-        df['Discount Function'] = df['Price']/face
-        return df
-    
-    def getspot(df,k=1,name = 'Spot',sourse = 'Price',face = 100):
-        df[name] = ((face/df[sourse])**(1/(k*df['Maturity']))-1)*k
-        return df
-    
-    def getprice(df,k=1,name = 'Price', sourse = 'Spot',face = 100):
-        df[name] = face/(1+df[sourse]/k)**(df['Maturity']*k)
-        return df
-        
-    def getforward(df,k=1,deltaT = 0.5,T = 0.5,name = 'Forward',sourse = 'Spot',face = 100):
-        SFT = int(T/deltaT)
-        df[name] = ((((1+df[sourse]/k)**(k*df['Maturity'])*(1+ \
-          df[sourse].shift(SFT)/k)**(-k*df['Maturity'].shift(SFT)))**\
-    (1/(k*(df['Maturity']-df['Maturity'].shift(SFT))))-1)*k).shift(-SFT)
-        return df
-    
-    def getPar(df,k=1,CouponFreq = 0.5, deltaT = 0.5,name = 'Par Yield', sourse = 'Price', face = 100):
-        DFT = int(CouponFreq/deltaT)
-        for i in range(0,len(df)):
-            if df.loc[i,'Maturity'] <= CouponFreq:
-                df.loc[i,'Interm'] = df.loc[i,'Maturity']*df.loc[i,sourse]/face
-            else:
-                 df.loc[i,'Interm'] = df.loc[i-DFT,'Interm'] + df.loc[i,sourse]/(k*face)
-        df[name] = (1-df[sourse]/face)/df['Interm']
-        return df
 
-class Term_Structure_Estimations:
-    def Nelson_Siegel_Estimation(df,k=1,face = 100, variation = False):
-        def NSEerror(params):
-            if variation == False:
-                Est_Spot = params[0] + \
-                params[1]*(1-np.exp(-df['Maturity']/params[3]))/df['Maturity']*params[3]+\
-                params[2]*((1-np.exp(-df['Maturity']/params[3]))/df['Maturity']*params[3] 
-                - np.exp(-df['Maturity']/params[3]))
-            else:
-                Est_Spot= params[0] + \
-                params[1]*(1-np.exp(-df['Maturity']/params[3]))/df['Maturity']*params[3]+\
-                params[2]*((1-np.exp(-df['Maturity']/params[4]))/df['Maturity']*params[4] 
-                - np.exp(-df['Maturity']/params[4]))
-            Est_Price = face/(1+Est_Spot/k)**(k*df['Maturity'])
-            Price_Diff = Est_Price - df['Price']
-            error = np.dot(Price_Diff**2,1/df['Maturity'])
-            return error 
-        if variation == True:
-            params = np.array([0.5, 0.1, 0.3, 1.0,0.2])
+
+class ZeroCouponBond:
+    """Represents properties of zero coupon bonds"""
+    def __init__(self, fv, maturity):
+        """Initialize bond features"""
+        self.fv = fv
+        self.maturity = maturity
+
+
+    def __cont_ret(self, rate, T, t = 0):
+        """Returns continuous compounded return over time period T1 to T2"""
+        return np.exp(rate * (T - t))
+
+
+    def __disc_ret(self, rate, k, T, t = 0):
+        """Returns discrete compounded return over time period T1 to T2"""
+        return np.power(1 + rate / k, k * (T - t))
+
+
+    def __future_value(self, X, spot, T, t = 0, k = 1):
+        """Returns future value of a bond. Default to continuously compounded"""
+        if k == 0:
+            return X * self.__cont_ret(spot, T, t)
         else:
-            params = np.array([0, 0, 0, 1])
-        res = minimize(NSEerror, params, method='nelder-mead',options={'xtol': 0.00001, 'disp': True})
-        params = res.x    
-            
-        return params
-    
-    def Svensson_Estimation(df,k=1,face = 100):
-        def SSEerror(params):
-            Est_Spot = params[0] + \
-            params[1]*(1-np.exp(-df['Maturity']/params[3]))/df['Maturity']*params[3]+\
-            params[2]*((1-np.exp(-df['Maturity']/params[3]))/df['Maturity']*params[3] 
-            - np.exp(-df['Maturity']/params[3])) +\
-            params[4]*((1-np.exp(-df['Maturity']/params[5]))/df['Maturity']*params[5] 
-            - np.exp(-df['Maturity']/params[5])) 
+            return X * self.__disc_ret(spot, k, T, t)
 
-            Est_Price = face/(1+Est_Spot/k)**(k*df['Maturity'])
-            Price_Diff = Est_Price - df['Price']
-            error = np.dot(Price_Diff**2,1/df['Maturity'])
+
+    def __present_value(self, C, spot, T, t = 0, k = 1):
+        """Returns present value of a bond. Default to continuously compounded"""
+        if k == 0:
+            return C / self.__cont_ret(spot, T, t)
+        else:
+            return C / self.__disc_ret(spot, k, T, t)
+    
+
+    def get_discount_function(self, spot, T, t = 0, k = 1):
+        """Returns discount rate of a bond"""
+        return self.__present_value(1, spot, T, t, k)
+    
+
+    def get_spot(self, price, t = 0, k = 1):
+        """Returns spot rate of a bond given bond price"""
+        if k == 0:
+            return - np.log(self.fv/price) / (self.maturity - t)
+        else:
+            return (np.power(self.fv/price, 1 / (k * (self.maturity - t))) - 1) * k
+    
+
+    def get_price(self, spot, t = 0, k = 1):
+        """Returns bond price given spot rate"""
+        if k == 0:
+            return self.fv * np.exp(- spot * (self.maturity - t))
+        else:
+            return np.power(self.fv / (1 + spot / k), (self.maturity - t) * k)
+        
+
+    def get_forward(self, spot1, spot2, T1, T2, t = 0, k = 1):
+        """Returns forward rate over time period T1 to T2"""
+        ret_T1 = self.__disc_ret(spot1, k, T1, t)
+        ret_T2 = self.__disc_ret(spot2, k, T2, t)
+        return np.power(ret_T2 / ret_T1 - 1, 1 / (k * (T2 - T1))) * k
+
+    
+    def get_par_yield(self, spot, t = 0, k = 1, coupon_t = 0, coupon_k = 2):
+        """Returns par yield curve of a bond"""
+        coupon_freq = 1 / coupon_k
+        n_c = 0 if self.maturity < coupon_freq else int((self.maturity - coupon_t) / coupon_freq) + 1
+        t_c = [coupon_t + i * coupon_freq for i in range(n_c)]
+        z = self.get_discount_function(spot, t_c, t, k)
+        z.append(self.get_discount_function(spot, self.maturity, t, k))
+        return k * (1 - z[-1]) / sum(z)
+
+
+    def nelson_siegel_estimation(self, true_price, k = 1, variation = False):
+        """Returns nelson siegel term structure estimation"""
+        def NSEerror(params):
+            exp_t1 = np.exp(- self.maturity / params[3])
+            exp_t2 = np.exp(- self.maturity / params[4])
+            common_term = params[0] + params[1] * (1 - exp_t1) / self.maturity * params[3]
+            if not variation:
+                diff_term = params[2] * ((1 - exp_t1) / self.maturity * params[3] - exp_t1)
+            else:
+                diff_term = params[2] * ((1 - exp_t2) / self.maturity * params[4] - exp_t2)
+            est_spot = common_term + diff_term
+            est_price= self.get_price(est_spot, k)
+            error = np.dot(np.power(est_price - true_price, 2),1 / self.maturity)
             return error 
-        
-        params = np.array([0, 0, 0, 1,0,2])
-
-        res = minimize(SSEerror, params, method='nelder-mead',options={'xtol': 0.0001, 'disp': True})
-        params = res.x    
-            
-        return params
-
-        
+        params = np.array([0.5, 0.1, 0.3, 1.0, 0.2]) if variation else np.array([0, 0, 0, 1])
+        res = minimize(NSEerror, params, method = 'nelder-mead', options = {'xtol': 0.00001, 'disp': True})
+        return res.x
     
+
+    def svensson_estimation(self, true_price, k = 1):
+        """Returns svensson term structure estimation"""
+        def SSEerror(params):
+            exp_t1 = np.exp(- self.maturity / params[4])
+            exp_t2 = np.exp(- self.maturity / params[5])
+            est_spot = params[0] + params[1] * (1 - exp_t1) / self.maturity * params[4] + \
+                        params[2] * ((1 - exp_t1) / self.maturity * params[4] - exp_t1) + \
+                        params[3] * ((1 - exp_t2) / self.maturity * params[5] - exp_t2)
+            est_price= self.get_price(est_spot, k)
+            error = np.dot(np.power(est_price - true_price, 2),1 / self.maturity)
+            return error 
+        params = np.array([0, 0, 0, 1, 0, 2])
+        res = minimize(SSEerror, params, method = 'nelder-mead', options = {'xtol': 0.0001, 'disp': True})
+        return res.x
