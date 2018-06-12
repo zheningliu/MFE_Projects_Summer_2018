@@ -6,8 +6,8 @@ Created on Wed Jun  6 11:06:22 2018
 """
 
 import numpy as np
-import os
 import pandas as pd
+import math
 from scipy.optimize import minimize
 
 
@@ -70,17 +70,25 @@ class ZeroCouponBond:
         """Returns forward rate over time period T1 to T2"""
         ret_T1 = self.__disc_ret(spot1, k, T1, t)
         ret_T2 = self.__disc_ret(spot2, k, T2, t)
-        return np.power(ret_T2 / ret_T1 - 1, 1 / (k * (T2 - T1))) * k
+        return (np.power(ret_T2 / ret_T1, 1 / (k * (T2 - T1))) - 1) * k
 
     
     def get_par_yield(self, spot, t = 0, k = 1, coupon_t = 0, coupon_k = 2):
         """Returns par yield curve of a bond"""
         coupon_freq = 1 / coupon_k
-        n_c = 0 if self.maturity < coupon_freq else int((self.maturity - coupon_t) / coupon_freq) + 1
-        t_c = [coupon_t + i * coupon_freq for i in range(n_c)]
-        z = self.get_discount_function(spot, t_c, t, k)
-        z.append(self.get_discount_function(spot, self.maturity, t, k))
-        return k * (1 - z[-1]) / sum(z)
+        first_coupon = coupon_t + coupon_freq
+        try:
+            T = [item for item in self.maturity]
+        except TypeError:
+            T = [self.maturity]
+            spot = [spot]
+        maturity_dict = dict.fromkeys(T, 0)
+        for m, s in zip(T, spot):
+            n_c = max(math.floor((m - first_coupon) / coupon_freq) + 1, 0)
+            t_c = pd.Series([coupon_t + (i+1) * coupon_freq for i in range(n_c)]) if n_c > 0 else pd.Series([])
+            maturity_dict[m] = self.get_discount_function(s, t_c, t, k)
+            maturity_dict[m] = maturity_dict[m].append(pd.Series(self.get_discount_function(s, m, t, k)))
+        return list(map(lambda x: k * (1 - maturity_dict[x].tolist()[-1]) / sum(maturity_dict[x]), T))
 
 
     def nelson_siegel_estimation(self, true_price, k = 1, variation = False):
