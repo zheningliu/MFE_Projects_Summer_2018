@@ -19,35 +19,35 @@ class ZeroCouponBond:
         self.maturity = maturity
 
 
-    def __cont_ret(self, rate, T, t = 0):
+    def cont_ret(self, rate, T, t = 0):
         """Returns continuous compounded return over time period T1 to T2"""
         return np.exp(rate * (T - t))
 
 
-    def __disc_ret(self, rate, k, T, t = 0):
+    def disc_ret(self, rate, k, T, t = 0):
         """Returns discrete compounded return over time period T1 to T2"""
         return np.power(1 + rate / k, k * (T - t))
 
 
-    def __future_value(self, X, spot, T, t = 0, k = 1):
+    def future_value(self, X, spot, T, t = 0, k = 1):
         """Returns future value of a bond. Default to annually compounded"""
         if k == 0:
-            return X * self.__cont_ret(spot, T, t)
+            return X * self.cont_ret(spot, T, t)
         else:
-            return X * self.__disc_ret(spot, k, T, t)
+            return X * self.disc_ret(spot, k, T, t)
 
 
-    def __present_value(self, C, spot, T, t = 0, k = 1):
+    def present_value(self, C, spot, T, t = 0, k = 1):
         """Returns present value of a bond. Default to annually compounded"""
         if k == 0:
-            return C / self.__cont_ret(spot, T, t)
+            return C / self.cont_ret(spot, T, t)
         else:
-            return C / self.__disc_ret(spot, k, T, t)
+            return C / self.disc_ret(spot, k, T, t)
     
 
     def get_discount_function(self, spot, T, t = 0, k = 1):
         """Returns discount rate of a bond"""
-        return self.__present_value(1, spot, T, t, k)
+        return self.present_value(1, spot, T, t, k)
     
 
     def get_spot(self, price, t = 0, k = 1):
@@ -68,8 +68,8 @@ class ZeroCouponBond:
 
     def get_forward(self, spot1, spot2, T1, T2, t = 0, k = 1):
         """Returns forward rate over time period T1 to T2"""
-        ret_T1 = self.__disc_ret(spot1, k, T1, t)
-        ret_T2 = self.__disc_ret(spot2, k, T2, t)
+        ret_T1 = self.disc_ret(spot1, k, T1, t)
+        ret_T2 = self.disc_ret(spot2, k, T2, t)
         return (np.power(ret_T2 / ret_T1, 1 / (k * (T2 - T1))) - 1) * k
 
     
