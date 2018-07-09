@@ -21,6 +21,7 @@ def main():
 
     # generate random number
     rand_dict = bare_bone_mc_normal(seq)
+    ipdb.set_trace()
 
     # pseudo generate ST using the random series
     ST_dict = {key:simulate_price(rand_dict[key]) for key in rand_dict}
@@ -51,7 +52,7 @@ def main():
 
     # antithetic method
     t_anti1 = time.time()
-    P_anti = {key:antithetic(rand_dict[key]) for key in rand_dict}
+    P_anti = {key:antithetic(rand_dict[key])[1] for key in rand_dict}
     t_anti = time.time() - t_anti1
 
     # antithetic price stats
@@ -69,35 +70,27 @@ def main():
     method = ['p', 'm', 'c']
     sample_size = 1000
     S0 = np.linspace(0.9 * St, 1.1 * St, sample_size)
-    delta = {}
-    for me in method:
-        delta_bs = []
-        me_df = pd.DataFrame(columns=epsilon)
-        for S in S0:
-            # finite difference
-            for e in epsilon:
-                me_df.loc[S, e] = finite_diff_delta(rand_dict[1000], risk_neutral_put, S, e, me)
-            # bs delta
-            delta_bs.append(bs_delta_gamma(S, K, delta_t, r, sigma)[0])
-        me_df.loc[:, 'bs'] = delta_bs
-        ipdb.set_trace()
-        delta["delta_{0}".format(me)] = me_df.sort_index()
-        # delta["delta_{0}".format(me)].plot(title="Delta using method %s" % me)
-        # plt.show()
+    # args = (K, delta_t, r, y, sigma, rand_dict)
+    # plot_sensitivity(S0, epsilon, method, 'delta', *args, anti=False)
 
-    # plot finite difference gamma
-    gamma_bs = []
-    gamma_df = pd.DataFrame(columns=epsilon)
-    for S in S0:
-        # finite difference
-        for e in epsilon:
-            gamma_df.loc[S, e] = finite_diff_gamma(rand_dict[1000], S, e)
-        # bs gamma
-        gamma_bs.append(bs_delta_gamma(S, K, delta_t, r, sigma)[1])
-    gamma_df.loc[:, 'bs'] = gamma_bs
-    gamma_df = gamma_df.sort_index()
-    gamma_df.plot(title="Gamma function")
-    plt.show()
+    # # plot finite difference gamma
+    # plot_sensitivity(S0, epsilon, method, 'gamma', *args, anti=False)
+
+    # # plot antithetic sensitivities
+    # plot_sensitivity(S0, epsilon, method, 'delta', *args, anti=True)
+    # plot_sensitivity(S0, epsilon, method, 'gamma', *args, anti=True)
+
+    # likelihood greeks plot
+    greeks_ls = {'Delta':lr_delta, 'Gamma':lr_gamma, 'Rho':lr_rho, 'Vega':lr_vega}
+    for key in greeks_ls:
+        lr_ls = []
+        bs_ls = []
+        for S in S0:
+            lr_ls.append(greeks_ls[key](rand_dict[1000], risk_neutral_put, S))
+            bs_ls.append(bs_put_greeks(S, K, delta_t, r, y, sigma)[key])
+        plt.plot(S0, lr_ls, 'b-', S0, bs_ls, 'r-')
+        plt.title("%s Likelihood Ratio vs. Black Scholes" % key)
+        plt.show()
 
 
 def bare_bone_mc_normal(size_seq):
@@ -153,7 +146,7 @@ def antithetic(x, St=2775):
     ST = simulate_price(x, St)
     ST_anti = simulate_price(x_anti, St)
     PT = 0.5 * np.add(risk_neutral_put(ST)[2], risk_neutral_put(ST_anti)[2])
-    return PT
+    return np.mean(PT), PT
 
 
 def efficiency_ratio(var1, var2, t1, t2):
@@ -173,45 +166,114 @@ def finite_diff_delta(x, option_payoff, St, epsilon, method, anti=False):
     Return: (float) delta of some asset prices using finite difference.
     '''
     ST = simulate_price(x, St)
-    Pt = option_payoff(ST)[0] if not anti else antithetic(x, St)
+    Pt = option_payoff(ST)[0] if not anti else antithetic(x, St)[0]
     ST_delta = epsilon * St
     if method == 'p':
         St2 = St * (1 + epsilon)
         ST2 = simulate_price(x, St2)
-        Pt2 = option_payoff(ST2)[0] if not anti else antithetic(x, St2)
+        Pt2 = option_payoff(ST2)[0] if not anti else antithetic(x, St2)[0]
     elif method == 'm':
         St2 = St * (1 - epsilon)
         ST2 = simulate_price(x, St2)
-        Pt2 = option_payoff(ST2)[0] if not anti else antithetic(x, St2)
+        Pt2 = option_payoff(ST2)[0] if not anti else antithetic(x, St2)[0]
         ST_delta *= -1
     elif method == 'c':
         St1 = St * (1 - epsilon)
         St2 = St * (1 + epsilon)
         ST1 = simulate_price(x, St1)
         ST2 = simulate_price(x, St2)
-        Pt = option_payoff(ST1)[0] if not anti else antithetic(x, St1)
-        Pt2 = option_payoff(ST2)[0] if not anti else antithetic(x, St2)
+        Pt = option_payoff(ST1)[0] if not anti else antithetic(x, St1)[0]
+        Pt2 = option_payoff(ST2)[0] if not anti else antithetic(x, St2)[0]
         ST_delta *= 2
     return (Pt2 - Pt) / ST_delta
 
 
-def finite_diff_gamma(x, St, epsilon, method='c'):
+def finite_diff_gamma(x, St, epsilon, method='c', anti=False):
     '''Returns gamma of some asset prices using finite difference'''
     ST = simulate_price(x, St)
     ST1 = simulate_price(x, St * (1 - epsilon))
     ST2 = simulate_price(x, St * (1 + epsilon))
-    Pt, Pt1, Pt2 = [risk_neutral_put(s)[0] for s in [ST, ST1, ST2]]
+    Pt, Pt1, Pt2 = [risk_neutral_put(s)[0] for s in [ST, ST1, ST2]] if not anti \
+        else [antithetic(x, s)[0] for s in [St1, St2, St]]
     ST_delta = epsilon * St
     return (Pt1 + Pt2 - 2 * Pt) / (ST_delta ** 2)
 
 
-def bs_delta_gamma(S, K, T, r, sigma):
+def bs_put_greeks(S, K, T, r, y, sigma):
     '''Returns BS greeks associated with a put option'''
-    d1 = (np.log(float(S) / K) + (r + sigma**2 / 2) * T) / (sigma * np.sqrt(T))
+    rls = {}
+    d1 = (np.log(float(S) / K) + (r - y + sigma**2 / 2) * T) / (sigma * np.sqrt(T))
     d2 = d1 - (sigma * np.sqrt(T))
-    Delta = norm.cdf(d1) - 1
-    Gamma = norm.pdf(d1) / (S * sigma * np.sqrt(T))
-    return Delta, Gamma
+    rls['Delta'] = norm.cdf(d1) - 1
+    rls['Gamma'] = norm.pdf(d1) / (S * sigma * np.sqrt(T))
+    rls['Vega'] = S * norm.pdf(d1) * np.sqrt(T)
+    rls['Rho'] = - K * np.sqrt(T) * np.exp(- r * T) * norm.cdf(- d2)
+    return rls
+
+
+def plot_sensitivity(S0, epsilon, method, greek, *args, anti=False):
+    '''Plot greeks using finite differencing'''
+    (K, delta_t, r, y, sigma, rand_dict) = args
+    if greek == 'delta':
+        delta = {}
+        for me in method:
+            delta_bs = []
+            me_df = pd.DataFrame(columns=epsilon)
+            for S in S0:
+                # finite difference
+                for e in epsilon:
+                    me_df.loc[S, e] = finite_diff_delta(rand_dict[1000], risk_neutral_put, S, e, me, anti)
+                # bs delta
+                delta_bs.append(bs_put_greeks(S, K, delta_t, r, y, sigma)['Delta'])
+            me_df.loc[:, 'bs'] = delta_bs
+            delta["delta_{0}".format(me)] = me_df.sort_index()
+            delta["delta_{0}".format(me)].plot(title="Delta using method %s" % me)
+            plt.show()
+    elif greek == 'gamma':
+        gamma_bs = []
+        gamma_df = pd.DataFrame(columns=epsilon)
+        for S in S0:
+            # finite difference
+            for e in epsilon:
+                gamma_df.loc[S, e] = finite_diff_gamma(rand_dict[1000], S, e)
+            # bs gamma
+            gamma_bs.append(bs_put_greeks(S, K, delta_t, r, y, sigma)['Gamma'])
+        gamma_df.loc[:, 'bs'] = gamma_bs
+        gamma_df = gamma_df.sort_index()
+        gamma_df.loc[:, [0.1, 0.01, 'bs']].plot(title="Gamma function")
+        gamma_df.loc[:, 0.001].plot(style='c.')
+        plt.show()
+    return None
+
+
+def lr_delta(x, option_payoff, St, delta_t=1, sigma=0.15, r=0.0278, y=0.0189):
+    '''Returns rho of asset prices uding likelihood ratio method'''
+    ST = simulate_price(x, St)
+    sum_payoff = np.dot(x, option_payoff(ST)[2])
+    return np.exp(- r * delta_t) * sum_payoff / (np.sqrt(delta_t) * St * sigma * len(x))
+
+
+def lr_gamma(x, option_payoff, St, delta_t=1, sigma=0.15, r=0.0278, y=0.0189):
+    '''Returns rho of asset prices uding likelihood ratio method'''
+    ST = simulate_price(x, St)
+    term = np.subtract((np.power(x,2) - 1) / (sigma**2 * np.sqrt(delta_t) * St**2), x / (sigma * np.sqrt(delta_t) * St**2))
+    sum_payoff = np.dot(term, option_payoff(ST)[2])
+    return np.exp(- r * delta_t) * sum_payoff / len(x)
+
+
+def lr_rho(x, option_payoff, St, delta_t=1, sigma=0.15, r=0.0278, y=0.0189):
+    '''Returns rho of asset prices uding likelihood ratio method'''
+    ST = simulate_price(x, St)
+    sum_payoff = np.dot(x, option_payoff(ST)[2])
+    return np.sqrt(delta_t) * np.exp(- r * delta_t) * sum_payoff / (sigma * len(x))
+
+
+def lr_vega(x, option_payoff, St, delta_t=1, sigma=0.15, r=0.0278, y=0.0189):
+    '''Returns rho of asset prices uding likelihood ratio method'''
+    ST = simulate_price(x, St)
+    term = np.subtract((np.power(x,2) - 1) / sigma, x * np.sqrt(delta_t))
+    sum_payoff = np.dot(term, option_payoff(ST)[2])
+    return np.exp(- r * delta_t) * sum_payoff / len(x)
 
 
 if __name__ == "__main__":
