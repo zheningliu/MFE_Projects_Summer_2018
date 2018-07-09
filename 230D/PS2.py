@@ -3,18 +3,22 @@ import pandas as pd
 from scipy.optimize import fsolve
 import time
 import matplotlib.pyplot as plt
+from scipy.stats import norm
+import ipdb
 
-# part a
-St = 2775
-delta_t = 1
-sigma = 0.15
-r = 0.0278
-y = 0.0189
-t1 = 2
-t2 = 1
-seq = [10**3, 10**4, 10**5, 10**6]
 
 def main():
+    # initialization
+    St = 2775
+    K = 2775
+    delta_t = 1
+    sigma = 0.15
+    r = 0.0278
+    y = 0.0189
+    t1 = 2
+    t2 = 1
+    seq = [10**3, 10**4, 10**5, 10**6]
+
     # generate random number
     rand_dict = bare_bone_mc_normal(seq)
 
@@ -36,9 +40,9 @@ def main():
     # risk neutral put price
     t_bb1 = time.time()
     ST = {key:simulate_price(rand_dict[key]) for key in rand_dict}  # repeat to be counted into run time
-    Pt = {key:risk_neutral_put(ST[key]) for key in ST}
+    Pt = {key:risk_neutral_put(ST[key])[2] for key in ST}
     t_bb = time.time() - t_bb1
-    Pt_p = {key:risk_neutral_put(ST[key]) for key in ST}
+    Pt_p = {key:risk_neutral_put(ST[key])[2] for key in ST}
 
     # bare bone price stats
     Pt_stats = sample_stats(Pt, output=['mean', 'std dev'])
@@ -60,25 +64,28 @@ def main():
     eff_real = {key:efficiency_ratio(Panti_stats.loc['std dev', key]**2, Pt_stats.loc['std dev', key]**2, t_anti, t_bb) for key in rand_dict}
     print(t_anti, t_bb, eff_real)
 
-    # plot finite difference delta
+    # plot delta
     epsilon = [0.1, 0.01, 0.001]
     method = ['p', 'm', 'c']
-    delta = {}
-    for me in method:
-        delta["delta_{0}".format(me)] = pd.DataFrame({e:finite_diff_delta(rand_dict[1000], St, e, me) for e in epsilon})
-        delta["delta_{0}".format(me)] = delta["delta_{0}".format(me)].set_index(ST_dict[1000]).sort_index()
-        delta["delta_{0}".format(me)].plot(title="Delta using method %s" % me, xlim=(0.9 * St, 1.1 * St))
-
-    # plot bs delta
-    sample_size = 1000
+        sample_size = 1000
     S0 = np.linspace(0.9 * St, 1.1 * St, sample_size)
     delta_bs = []
     gamma_bs = []
-    for S in S0:
-        delta, gamma = bs_delta_gamma(S, K, delta_t, r, sigma)
-        delta_bs.append(delta)
-        gamma_bs.append(gamma)
-    plt.plot(S0, delta_bs)
+    delta = {}
+    for me in method:
+        me_df = pd.DataFrame(columns=epsilon)
+        for S in S0:
+            # finite difference
+            for e in epsilon:
+                me_df.loc[S, e] = finite_diff_delta(rand_dict[1000], S, e, me)
+            # bs delta and gamma
+            delta, gamma = bs_delta_gamma(S, K, delta_t, r, sigma)
+            delta_bs.append(delta)
+            gamma_bs.append(gamma)
+        me_df.loc[:, 'bs'] = delta_bs
+        delta["delta_{0}".format(me)] = me_df.sort_index()
+        delta["delta_{0}".format(me)].plot(title="Delta using method %s" % me)
+        plt.show()
 
     # plot finite difference gamma
     gamma = pd.DataFrame({e:finite_diff_gamma(ST_dict[1000], e) for e in epsilon})
@@ -87,12 +94,13 @@ def main():
 
     # BS gamma
     plt.plot(S0, gamma_bs)
+    plt.show()
 
 
 def bare_bone_mc_normal(size_seq):
     '''Generate a dictionary of random normal series with various length sequence'''
     rand_dict = {}
-    for n in seq:
+    for n in size_seq:
         np.random.seed(123)
         rand_dict[n] = np.random.normal(size=n)
     return rand_dict
@@ -105,12 +113,12 @@ def simulate_price(x, St=2775, delta_t=1, sigma=0.15, r=0.0278, y=0.0189):
 
 def sample_stats(sample_dict, max_min=False, output=[]):
     '''Compute sample statistics'''
-    stats_df = pd.DataFrame(columns=seq)
+    stats_df = pd.DataFrame(columns=sample_dict.keys())
     for key in sample_dict:
-        stats_df.loc['mean', key] = sample_dict[key].mean()
-        stats_df.loc['std dev', key] = sample_dict[key].std()
-        stats_df.loc['log mean', key] = np.log(sample_dict[key]).mean()
-        stats_df.loc['log variance', key] = np.log(sample_dict[key]).var()
+        stats_df.loc['mean', key] = np.mean(sample_dict[key])
+        stats_df.loc['std dev', key] = np.std(sample_dict[key])
+        stats_df.loc['log mean', key] = np.mean(np.log(sample_dict[key]))
+        stats_df.loc['log variance', key] = np.var(np.log(sample_dict[key]))
         if max_min:
             stats_df.loc['max', key] = max(sample_dict[key])
             stats_df.loc['min', key] = min(sample_dict[key])
@@ -130,15 +138,18 @@ def transformation(params, *args):
 
 def risk_neutral_put(ST, K=2775, delta_t=1, r=0.0278):
     '''Computes risk neural put option price given ST'''
-    return np.multiply(np.exp(- r * delta_t), [max(s, 0) for s in K - ST])
+    payoff = list(map(lambda x: (K - x) if K > x else 0, ST))
+    price=np.exp(- r * delta_t) * np.mean(payoff)
+    error=np.exp(- r * delta_t) * np.std(payoff) / np.sqrt(len(ST))
+    return price, error, payoff
 
 
-def antithetic(x):
+def antithetic(x, St=2775):
     '''Antithetic method for variance reduction'''
     x_anti = np.multiply(x, -1)
-    ST = simulate_price(x)
-    ST_anti = simulate_price(x_anti)
-    PT = 0.5 * np.add(risk_neutral_put(ST), risk_neutral_put(ST_anti))
+    ST = simulate_price(x, St)
+    ST_anti = simulate_price(x_anti, St)
+    PT = 0.5 * np.add(risk_neutral_put(ST)[2], risk_neutral_put(ST_anti)[2])
     return PT
 
 
@@ -147,37 +158,46 @@ def efficiency_ratio(var1, var2, t1, t2):
     return var1 * t1 / (var2 * t2)
 
 
-def finite_diff_delta(x, St, epsilon, method, ST_anti=np.array([])):
-    '''Returns delta of some asset prices using finite difference'''
+def finite_diff_delta(x, St, epsilon, method, anti=False):
+    '''
+    x: (list) a list of random variables
+    St: (float) S0 value
+    epsilon: (float) a number of bump size
+    method: (string) delta plus, minus or center
+    anti: (boolean) antithetic variates method
+
+    Return: (float) delta of some asset prices using finite difference.
+    '''
     ST = simulate_price(x, St)
-    Pt = risk_neutral_put(ST) if ST_anti.size==0 else antithetic(x, St)
+    Pt = risk_neutral_put(ST)[0] if not anti else antithetic(x, St)
     ST_delta = epsilon * St
     if method == 'p':
         St2 = St * (1 + epsilon)
         ST2 = simulate_price(x, St2)
-        Pt2 = risk_neutral_put(ST2) if ST_anti.size==0 else antithetic(x, St2)
+        Pt2 = risk_neutral_put(ST2)[0] if not anti else antithetic(x, St2)
     elif method == 'm':
         St2 = St * (1 - epsilon)
         ST2 = simulate_price(x, St2)
-        Pt2 = risk_neutral_put(ST2) if ST_anti.size==0 else antithetic(x, St2)
+        Pt2 = risk_neutral_put(ST2)[0] if not anti else antithetic(x, St2)
+        ST_delta *= -1
     elif method == 'c':
         St1 = St * (1 - epsilon)
         St2 = St * (1 + epsilon)
         ST1 = simulate_price(x, St1)
         ST2 = simulate_price(x, St2)
-        Pt = risk_neutral_put(ST1) if ST_anti.size==0 else antithetic(x, St1)
-        Pt2 = risk_neutral_put(ST2) if ST_anti.size==0 else antithetic(x, St2)
+        Pt = risk_neutral_put(ST1)[0] if not anti else antithetic(x, St1)
+        Pt2 = risk_neutral_put(ST2)[0] if not anti else antithetic(x, St2)
         ST_delta *= 2
-    raise ValueError
     return (Pt2 - Pt) / ST_delta
 
 
-def finite_diff_gamma(ST, epsilon, method='c'):
+def finite_diff_gamma(x, St, epsilon, method='c'):
     '''Returns gamma of some asset prices using finite difference'''
-    ST_delta = ST * epsilon
-    ST1 = ST - ST_delta
-    ST2 = ST + ST_delta
-    Pt, Pt1, Pt2 = [risk_neutral_put(s) for s in [ST, ST1, ST2]]
+    ST = simulate_price(x, St)
+    ST1 = simulate_price(x, St * (1 - epsilon))
+    ST2 = simulate_price(x, St * (1 + epsilon))
+    Pt, Pt1, Pt2 = [risk_neutral_put(s)[0] for s in [ST, ST1, ST2]]
+    ST_delta = epsilon * St
     return (Pt1 + Pt2 - 2 * Pt) / (ST_delta ** 2)
 
 
