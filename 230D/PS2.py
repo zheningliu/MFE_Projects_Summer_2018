@@ -257,7 +257,6 @@ def finite_diff_delta(x, option_payoff, St, epsilon, method, anti=False):
         ST_delta *= 2
     return (Pt2 - Pt) / ST_delta
 
-
 def finite_diff_gamma(x, St, epsilon, method='c', anti=False):
     '''Returns gamma of some asset prices using finite difference'''
     ST = simulate_price(x, St)
@@ -352,64 +351,6 @@ def lr_vega(x, option_payoff, St, delta_t=1, sigma=0.15, r=0.0278, y=0.0189):
      / len(x)
     std_payoff = np.exp(-1 * r * delta_t) * np.std(payoff)
     return sum_payoff, std_payoff
-
-
-def SQP_MC(S_T, K=2775,delta_t=1, r=0.0278):
-    "Simulate price of Sqrt Put option given terminal stock price"
-    payoff = list(map(lambda x:np.sqrt(K)*(np.sqrt(K)-np.sqrt(x)) if K>x else 0,S_T))
-    price=np.exp(-r*delta_t)*np.mean(payoff)
-    error=np.exp(-r*delta_t)*np.std(payoff)/np.sqrt(len(S_T))
-    return price, error, payoff
-
-
-def BS(security,K,S,r,y,sigma,T=1,t=0):
-    d1=((np.log(S/K)+(r-y)*(T-t))/(sigma*np.sqrt(T-t)))+sigma*np.sqrt(T-t)/2
-    d2=((np.log(S/K)+(r-y)*(T-t))/(sigma*np.sqrt(T-t)))-sigma*np.sqrt(T-t)/2
-    AONC = S*np.exp(-y*(T-t))*stats.norm.cdf(d1)
-    CONC = np.exp(-r*(T-t))*stats.norm.cdf(d2)
-    AONP = S*np.exp(-y*(T-t))*stats.norm.cdf(-d1)
-    CONP = np.exp(-r*(T-t))*stats.norm.cdf(-d2)
-    BSC = AONC - K*CONC
-    BSP = K*CONP - AONP 
-    if security == "BSC":
-        return BSC
-    elif security == "BSP": 
-        return BSP
-    elif security == "CONC": 
-        return CONC
-    elif security == "CONP":
-        return CONP
-    elif security == "AONC":
-        return AONC
-    elif security == "AONP":
-        return AONP
-    elif security == "d1":
-        return d1
-    elif security == "d2":
-        return d2
-
-
-def BL_payoff(S=2775, Kstar = 2775, sigma=0.15, r=0.0278, y=0.0189,T=1, t=0):
-    def integrand(K,*args):
-        d1=((np.log(S/K)+(r-y)*(T-t))/(sigma*np.sqrt(T-t)))+sigma*np.sqrt(T-t)/2
-        d2=((np.log(S/K)+(r-y)*(T-t))/(sigma*np.sqrt(T-t)))-sigma*np.sqrt(T-t)/2
-        AONP = S*np.exp(-y*(T-t))*stats.norm.cdf(-d1)
-        CONP = np.exp(-r*(T-t))*stats.norm.cdf(-d2)
-        BSP = K*CONP - AONP 
-        F_dd = .25*np.sqrt(K)*(Kstar**(-1.5))
-        func = BSP*F_dd
-        return func
-    args= (S,Kstar,sigma,r,y,T,t)
-    result = integrate.quad(integrand, 0, Kstar, args=args)
-    return result
-
-
-def cvar_MC(S_T, alpha, K=2775,delta_t=1, r=0.0278):
-    payoff = list(map(lambda x:(np.sqrt(K) - alpha*(np.sqrt(K)+np.sqrt(x)))*(np.sqrt(K)-np.sqrt(x)) if K>x else 0,S_T))
-    price=np.exp(-r*delta_t)*np.mean(payoff)
-    error=np.exp(-r*delta_t)*np.std(payoff)/np.sqrt(len(S_T))
-    return price, error, payoff
-
 
 if __name__ == "__main__":
     main()
