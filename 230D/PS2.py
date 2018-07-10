@@ -6,19 +6,18 @@ import matplotlib.pyplot as plt
 from scipy.stats import norm
 import ipdb
 
+# initialization
+St = 2775
+K = 2775
+delta_t = 1
+sigma = 0.15
+r = 0.0278
+y = 0.0189
+t1 = 2
+t2 = 1
+seq = [10**3, 10**4, 10**5, 10**6]
 
 def main():
-    # initialization
-    St = 2775
-    K = 2775
-    delta_t = 1
-    sigma = 0.15
-    r = 0.0278
-    y = 0.0189
-    t1 = 2
-    t2 = 1
-    seq = [10**3, 10**4, 10**5, 10**6]
-
     # generate random number
     rand_dict = bare_bone_mc_normal(seq)
 
@@ -40,9 +39,9 @@ def main():
     # risk neutral put price
     t_bb1 = time.time()
     ST_dict = {key:simulate_price(rand_dict[key]) for key in rand_dict}  # repeat to be counted into run time
-    Pt = {key:risk_neutral_put(ST_dict[key])[2] for key in ST_dict}
+    Pt = {key:risk_neutral_put(ST_dict[key])[3] for key in ST_dict}
     t_bb = time.time() - t_bb1
-    Pt_p = {key:risk_neutral_put(ST_dict[key])[2] for key in ST_dict}
+    Pt_p = {key:risk_neutral_put(ST_dict[key])[3] for key in ST_dict}
 
     # bare bone price stats
     Pt_stats = sample_stats(Pt, output=['mean', 'std dev'])
@@ -69,15 +68,15 @@ def main():
     method = ['p', 'm', 'c']
     sample_size = 1000
     S0 = np.linspace(0.9 * St, 1.1 * St, sample_size)
-    # args = (K, delta_t, r, y, sigma, rand_dict)
-    # plot_sensitivity(S0, epsilon, method, 'delta', *args, anti=False)
+    args = (K, delta_t, r, y, sigma, rand_dict)
+    plot_sensitivity(S0, epsilon, method, 'delta', *args, anti=False)
 
-    # # plot finite difference gamma
-    # plot_sensitivity(S0, epsilon, method, 'gamma', *args, anti=False)
+    # plot finite difference gamma
+    plot_sensitivity(S0, epsilon, method, 'gamma', *args, anti=False)
 
-    # # plot antithetic sensitivities
-    # plot_sensitivity(S0, epsilon, method, 'delta', *args, anti=True)
-    # plot_sensitivity(S0, epsilon, method, 'gamma', *args, anti=True)
+    # plot antithetic sensitivities
+    plot_sensitivity(S0, epsilon, method, 'delta', *args, anti=True)
+    plot_sensitivity(S0, epsilon, method, 'gamma', *args, anti=True)
 
     # likelihood greeks plot
     greeks_ls = {'Delta':lr_delta, 'Gamma':lr_gamma, 'Rho':lr_rho, 'Vega':lr_vega}
@@ -94,6 +93,72 @@ def main():
         plt.title("%s Likelihood Ratio vs. Black Scholes" % key)
         plt.legend(['Likelihood Ratio', 'Black Scholes', 'Standard Error'])
         plt.show()
+
+    # part 2a
+    SQP_MC_res = {key:SQP_MC(ST[key]) for key in ST} # Store MC result
+    SQP_MC_0 = {key:SQP_MC_res[key][0] for key in ST}
+    SQP_err = {key:SQP_MC_res[key][1] for key in ST}
+    SQP_payoff = {key:SQP_MC_res[key][2] for key in ST}
+
+    # part 2b
+    alpha = .5
+    y_eff = r - alpha*((r-y)+(alpha-1)*.5*(sigma**2))
+    # Transform to power option 
+    SQP_BS = np.sqrt(k)*BS("BSP",K=np.sqrt(k),S=np.sqrt(St),r=r,y=y_eff,sigma=abs(alpha)*sigma,T=delta_t)
+    t_stat = {key:(SQP_MC_0[key]-SQP_BS)/SQP_err[key] for key in rand_dict}
+    print(SQP_BS)
+    print(t_stat)
+
+    # part 2c
+    print(BL_payoff())
+
+    # part 2d
+    BSP_MC_res = {key:risk_neutral_put(ST[key]) for key in ST} # Store MC result
+    BSP_MC_0 = {key:BSP_MC_res[key][0] for key in ST}
+    BSP_err = {key:BSP_MC_res[key][1] for key in ST}
+    BSP_payoff = {key:BSP_MC_res[key][2] for key in ST}
+    BSP_MC_0
+    mc_cov = {key:np.cov(np.stack((SQP_payoff[key],BSP_payoff[key]))) for key in SQP_payoff}
+    mc_corr = {key:np.corrcoef(np.stack((SQP_payoff[key],BSP_payoff[key]))) for key in SQP_payoff}
+    print("cov:",mc_cov)
+    print("corr:",mc_corr)
+
+    # part 2e
+    cvar_MC_res = {key:cvar_MC(ST[key],.5) for key in ST} # Store MC result
+    cvar_MC_0 = {key:cvar_MC_res[key][0] for key in ST}
+    cvar_err = {key:cvar_MC_res[key][1] for key in ST}
+    cvar_payoff = {key:cvar_MC_res[key][2] for key in ST}
+    # compare error
+    err_diff = {key:SQP_err[key]-cvar_err[key] for key in SQP_err}
+    # efficiency
+    cvar_eff = {key:efficiency_ratio(BSP_err[key]**2, cvar_err[key]**2,1,2) for key in cvar_err}
+    print(cvar_MC_0)
+    print(err_diff)
+    print(cvar_eff)
+
+    # part 2f&i
+    epsilon = [0.1, 0.01, 0.001]
+    method = ['c']
+    sample_size = 1000
+    S0 = np.linspace(0.9 * St, 1.1 * St, sample_size)
+    delta_bs = []
+    gamma_bs = []
+    delta = {}
+    for me in method:
+        me_df = pd.DataFrame(columns=epsilon)
+        for S in S0:
+             # finite difference
+            for e in epsilon:
+                 me_df.loc[S, e] = finite_diff_delta(rand_dict[1000],SQP_MC, S, e, me)
+                # bs delta and gamma
+            delta, gamma = bs_delta_gamma(S, K, delta_t, r, sigma)
+            delta_bs.append(delta)
+            gamma_bs.append(gamma)
+        me_df.loc[:, 'bs'] = delta_bs
+        delta["delta_{0}".format(me)] = me_df.sort_index()
+        delta["delta_{0}".format(me)].plot(title="Delta using method %s" % me)
+        plt.show()
+    print(finite_diff_delta(rand_dict[1000],SQP_MC, S, .1, 'c'))
 
 
 def bare_bone_mc_normal(size_seq):
@@ -137,10 +202,11 @@ def transformation(params, *args):
 
 def risk_neutral_put(ST, St=2775, K=2775, delta_t=1, r=0.0278):
     '''Computes risk neural put option price given ST'''
-    payoff = list(map(lambda x: (K - x) if K > x else 0, ST))
-    price=np.exp(- r * delta_t) * np.mean(payoff)
-    error=np.exp(- r * delta_t) * np.std(payoff) / np.sqrt(len(ST))
-    return price, error, payoff
+    payoff = [max(s, 0) for s in K - ST]
+    payoff_disc = np.multiply(np.exp(- r * delta_t), [max(s, 0) for s in K - ST])
+    price = np.exp(- r * delta_t) * np.mean(payoff)
+    error = np.exp(- r * delta_t) * np.std(payoff) / np.sqrt(len(ST))
+    return price, error, payoff, payoff_disc
 
 
 def antithetic(x, St=2775):
@@ -148,7 +214,7 @@ def antithetic(x, St=2775):
     x_anti = np.multiply(x, -1)
     ST = simulate_price(x, St)
     ST_anti = simulate_price(x_anti, St)
-    PT = 0.5 * np.add(risk_neutral_put(ST)[2], risk_neutral_put(ST_anti)[2])
+    PT = 0.5 * np.add(risk_neutral_put(ST)[3], risk_neutral_put(ST_anti)[3])
     return np.mean(PT), PT
 
 
@@ -253,33 +319,95 @@ def lr_delta(x, option_payoff, St, delta_t=1, sigma=0.15, r=0.0278, y=0.0189):
     ST = simulate_price(x, St)
     payoff = np.multiply(x, option_payoff(ST, St)[2])
     sum_payoff = np.exp(- r * delta_t) * np.sum(payoff) / (np.sqrt(delta_t) * St * sigma * len(x))
-    return sum_payoff, np.std(payoff)
+    std_payoff = np.exp(- r * delta_t) * np.std(payoff) / (np.sqrt(delta_t) * St * sigma)
+    return sum_payoff, std_payoff
 
 
 def lr_gamma(x, option_payoff, St, delta_t=1, sigma=0.15, r=0.0278, y=0.0189):
     '''Returns rho of asset prices uding likelihood ratio method'''
     ST = simulate_price(x, St)
     term = np.subtract((np.power(x,2) - 1) / (sigma**2 * np.sqrt(delta_t) * St**2), x / (sigma * np.sqrt(delta_t) * St**2))
-    payoff = np.dot(term, option_payoff(ST, St)[2])
+    payoff = np.multiply(term, option_payoff(ST, St)[2])
     sum_payoff = np.exp(- r * delta_t) * np.sum(payoff) / len(x)
-    return sum_payoff, np.std(payoff)
+    std_payoff = np.exp(- r * delta_t) * np.std(payoff)
+    return sum_payoff, std_payoff
 
 
 def lr_rho(x, option_payoff, St, delta_t=1, sigma=0.15, r=0.0278, y=0.0189):
     '''Returns rho of asset prices uding likelihood ratio method'''
     ST = simulate_price(x, St)
-    payoff = np.dot(x, option_payoff(ST, St)[2])
+    payoff = np.multiply(x, option_payoff(ST, St)[2])
     sum_payoff = -1 * np.sqrt(delta_t) * np.exp(-1 * r * delta_t) * np.sum(payoff) / (sigma * len(x))
-    return sum_payoff, np.std(payoff)
+    std_payoff = np.sqrt(delta_t) * np.exp(-1 * r * delta_t) * np.std(payoff) / (sigma)
+    return sum_payoff, std_payoff
 
 
 def lr_vega(x, option_payoff, St, delta_t=1, sigma=0.15, r=0.0278, y=0.0189):
     '''Returns rho of asset prices uding likelihood ratio method'''
     ST = simulate_price(x, St)
     term = np.subtract((np.power(x,2) - 1) / sigma, x * np.sqrt(delta_t))
-    payoff = np.dot(term, option_payoff(ST, St)[2])
-    sum_payoff = np.exp(-1 * r * delta_t) * np.sum(payoff) / len(x)
-    return sum_payoff, np.std(payoff)
+    payoff = np.multiply(term, option_payoff(ST, St)[2])
+    sum_payoff = np.exp(-1 * r * delta_t) * np.sum(payoff)
+     / len(x)
+    std_payoff = np.exp(-1 * r * delta_t) * np.std(payoff)
+    return sum_payoff, std_payoff
+
+
+def SQP_MC(S_T, K=2775,delta_t=1, r=0.0278):
+    "Simulate price of Sqrt Put option given terminal stock price"
+    payoff = list(map(lambda x:np.sqrt(K)*(np.sqrt(K)-np.sqrt(x)) if K>x else 0,S_T))
+    price=np.exp(-r*delta_t)*np.mean(payoff)
+    error=np.exp(-r*delta_t)*np.std(payoff)/np.sqrt(len(S_T))
+    return price, error, payoff
+
+
+def BS(security,K,S,r,y,sigma,T=1,t=0):
+    d1=((np.log(S/K)+(r-y)*(T-t))/(sigma*np.sqrt(T-t)))+sigma*np.sqrt(T-t)/2
+    d2=((np.log(S/K)+(r-y)*(T-t))/(sigma*np.sqrt(T-t)))-sigma*np.sqrt(T-t)/2
+    AONC = S*np.exp(-y*(T-t))*stats.norm.cdf(d1)
+    CONC = np.exp(-r*(T-t))*stats.norm.cdf(d2)
+    AONP = S*np.exp(-y*(T-t))*stats.norm.cdf(-d1)
+    CONP = np.exp(-r*(T-t))*stats.norm.cdf(-d2)
+    BSC = AONC - K*CONC
+    BSP = K*CONP - AONP 
+    if security == "BSC":
+        return BSC
+    elif security == "BSP": 
+        return BSP
+    elif security == "CONC": 
+        return CONC
+    elif security == "CONP":
+        return CONP
+    elif security == "AONC":
+        return AONC
+    elif security == "AONP":
+        return AONP
+    elif security == "d1":
+        return d1
+    elif security == "d2":
+        return d2
+
+
+def BL_payoff(S=2775, Kstar = 2775, sigma=0.15, r=0.0278, y=0.0189,T=1, t=0):
+    def integrand(K,*args):
+        d1=((np.log(S/K)+(r-y)*(T-t))/(sigma*np.sqrt(T-t)))+sigma*np.sqrt(T-t)/2
+        d2=((np.log(S/K)+(r-y)*(T-t))/(sigma*np.sqrt(T-t)))-sigma*np.sqrt(T-t)/2
+        AONP = S*np.exp(-y*(T-t))*stats.norm.cdf(-d1)
+        CONP = np.exp(-r*(T-t))*stats.norm.cdf(-d2)
+        BSP = K*CONP - AONP 
+        F_dd = .25*np.sqrt(K)*(Kstar**(-1.5))
+        func = BSP*F_dd
+        return func
+    args= (S,Kstar,sigma,r,y,T,t)
+    result = integrate.quad(integrand, 0, Kstar, args=args)
+    return result
+
+
+def cvar_MC(S_T, alpha, K=2775,delta_t=1, r=0.0278):
+    payoff = list(map(lambda x:(np.sqrt(K) - alpha*(np.sqrt(K)+np.sqrt(x)))*(np.sqrt(K)-np.sqrt(x)) if K>x else 0,S_T))
+    price=np.exp(-r*delta_t)*np.mean(payoff)
+    error=np.exp(-r*delta_t)*np.std(payoff)/np.sqrt(len(S_T))
+    return price, error, payoff
 
 
 if __name__ == "__main__":
