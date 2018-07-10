@@ -83,13 +83,16 @@ def main():
     greeks_ls = {'Delta':lr_delta, 'Gamma':lr_gamma, 'Rho':lr_rho, 'Vega':lr_vega}
     for key in greeks_ls:
         lr_ls = []
+        err_ls = []
         bs_ls = []
         for S in S0:
-            lr_ls.append(greeks_ls[key](rand_dict[1000], risk_neutral_put, S))
+            sum_payoff, std_payoff = greeks_ls[key](rand_dict[1000], risk_neutral_put, S)
+            lr_ls.append(sum_payoff)
+            err_ls.append(std_payoff)
             bs_ls.append(bs_put_greeks(S, K, delta_t, r, y, sigma)[key])
-        plt.plot(S0, lr_ls, 'b-', S0, bs_ls, 'r-')
+        plt.plot(S0, lr_ls, 'b-', S0, bs_ls, 'r-', S0, err_ls, 'g-')
         plt.title("%s Likelihood Ratio vs. Black Scholes" % key)
-        plt.legned()
+        plt.legend(['Likelihood Ratio', 'Black Scholes', 'Standard Error'])
         plt.show()
 
 
@@ -248,31 +251,35 @@ def plot_sensitivity(S0, epsilon, method, greek, *args, anti=False):
 def lr_delta(x, option_payoff, St, delta_t=1, sigma=0.15, r=0.0278, y=0.0189):
     '''Returns rho of asset prices uding likelihood ratio method'''
     ST = simulate_price(x, St)
-    sum_payoff = np.dot(x, option_payoff(ST, St)[2])
-    return np.exp(- r * delta_t) * sum_payoff / (np.sqrt(delta_t) * St * sigma * len(x))
+    payoff = np.multiply(x, option_payoff(ST, St)[2])
+    sum_payoff = np.exp(- r * delta_t) * np.sum(payoff) / (np.sqrt(delta_t) * St * sigma * len(x))
+    return sum_payoff, np.std(payoff)
 
 
 def lr_gamma(x, option_payoff, St, delta_t=1, sigma=0.15, r=0.0278, y=0.0189):
     '''Returns rho of asset prices uding likelihood ratio method'''
     ST = simulate_price(x, St)
     term = np.subtract((np.power(x,2) - 1) / (sigma**2 * np.sqrt(delta_t) * St**2), x / (sigma * np.sqrt(delta_t) * St**2))
-    sum_payoff = np.dot(term, option_payoff(ST, St)[2])
-    return np.exp(- r * delta_t) * sum_payoff / len(x)
+    payoff = np.dot(term, option_payoff(ST, St)[2])
+    sum_payoff = np.exp(- r * delta_t) * np.sum(payoff) / len(x)
+    return sum_payoff, np.std(payoff)
 
 
 def lr_rho(x, option_payoff, St, delta_t=1, sigma=0.15, r=0.0278, y=0.0189):
     '''Returns rho of asset prices uding likelihood ratio method'''
     ST = simulate_price(x, St)
-    sum_payoff = np.dot(x, option_payoff(ST, St)[2])
-    return -1 * np.sqrt(delta_t) * np.exp(-1 * r * delta_t) * sum_payoff / (sigma * len(x))
+    payoff = np.dot(x, option_payoff(ST, St)[2])
+    sum_payoff = -1 * np.sqrt(delta_t) * np.exp(-1 * r * delta_t) * np.sum(payoff) / (sigma * len(x))
+    return sum_payoff, np.std(payoff)
 
 
 def lr_vega(x, option_payoff, St, delta_t=1, sigma=0.15, r=0.0278, y=0.0189):
     '''Returns rho of asset prices uding likelihood ratio method'''
     ST = simulate_price(x, St)
     term = np.subtract((np.power(x,2) - 1) / sigma, x * np.sqrt(delta_t))
-    sum_payoff = np.dot(term, option_payoff(ST, St)[2])
-    return np.exp(-1 * r * delta_t) * sum_payoff / len(x)
+    payoff = np.dot(term, option_payoff(ST, St)[2])
+    sum_payoff = np.exp(-1 * r * delta_t) * np.sum(payoff) / len(x)
+    return sum_payoff, np.std(payoff)
 
 
 if __name__ == "__main__":
